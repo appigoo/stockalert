@@ -236,19 +236,24 @@ KLINE_OPTIONS = ["1m", "5m", "15m", "30m", "1h", "1d"]
 # ─────────────────────────────────────────────
 #  HELPERS
 # ─────────────────────────────────────────────
-def fetch_stock_data(ticker: str, kline: str):
+def fetch_stock_data(ticker: str, kline: str, vol_days: int = 20):
     period = KLINE_PERIOD_MAP.get(kline, "5d")
     try:
         hist = yf.Ticker(ticker).history(period=period, interval=kline)
         if hist.empty or len(hist) < 2:
             return None
-        price     = float(hist["Close"].iloc[-1])
-        volume    = float(hist["Volume"].iloc[-1])
-        avg_vol   = float(hist["Volume"].iloc[:-1].mean())
+        price   = float(hist["Close"].iloc[-1])
+        volume  = float(hist["Volume"].iloc[-1])
+        # Use last N bars (excluding current) for average; cap at available bars
+        n       = min(vol_days, len(hist) - 1)
+        avg_vol = float(hist["Volume"].iloc[-1 - n : -1].mean()) if n > 0 else 0
         vol_ratio = volume / avg_vol if avg_vol > 0 else 0
         return {
             "price":     price,
+            "volume":    volume,
+            "avg_vol":   avg_vol,
             "vol_ratio": vol_ratio,
+            "vol_days":  n,           # actual bars used (may be less than requested)
             "ts":        datetime.now().strftime("%H:%M:%S"),
         }
     except Exception:
@@ -267,7 +272,8 @@ def check_conditions(item: dict, data: dict):
 
     if item["use_vol"]:
         vol_ok   = vol_r >= item["vol_mult"]
-        vol_desc = f"量比 {vol_r:.1f}x ≥ {item['vol_mult']}x"
+        n_actual = data.get("vol_days", item.get("vol_days", 20))
+        vol_desc = f"量比 {vol_r:.2f}x ≥ {item['vol_mult']}x（{n_actual}根均量）"
         if "AND" in item["logic"]:
             triggered = price_ok and vol_ok
             desc = f"{price_desc}  AND  {vol_desc}"
@@ -314,7 +320,8 @@ def run_poll_cycle():
         if not item.get("enabled", True):
             continue
         ticker = item["ticker"]
-        data   = fetch_stock_data(ticker, kline)
+        vol_days = item.get("vol_days", 20)
+        data     = fetch_stock_data(ticker, kline, vol_days)
 
         if data is None:
             st.session_state.logs.insert(0, {
@@ -331,11 +338,13 @@ def run_poll_cycle():
             last = st.session_state.last_triggered.get(ticker, 0)
             if now - last > 300:
                 st.session_state.last_triggered[ticker] = now
+                n_actual = data.get("vol_days", vol_days)
                 msg = (
                     f"🔔 <b>股票警報！</b>\n"
                     f"📌 股票：<b>{ticker}</b>\n"
                     f"💰 價格：${data['price']:.2f}\n"
-                    f"📊 量比：{data['vol_ratio']:.1f}x\n"
+                    f"📊 成交量：{data['volume']:,.0f}  (均量 {data['avg_vol']:,.0f}，{n_actual} 根)\n"
+                    f"📈 量比：{data['vol_ratio']:.2f}x\n"
                     f"✅ 條件：{desc}\n"
                     f"🕐 時間：{data['ts']}"
                 )
@@ -413,13 +422,14 @@ with st.sidebar:
             price_val = st.number_input("目標價 ($)", min_value=0.01, value=400.0, step=1.0)
 
         use_vol = st.checkbox("＋成交量條件", value=True)
-        vol_mult, logic = 2.0, "AND（兩者同時）"
+        vol_mult, vol_days, logic = 2.0, 20, "AND（兩者同時）"
         if use_vol:
             c3, c4 = st.columns(2)
             with c3:
-                vol_mult = st.number_input("量比 (×均量)", min_value=1.0, value=2.0, step=0.5)
+                vol_mult = st.number_input("量比 X (×均量)", min_value=1.0, value=2.0, step=0.5)
             with c4:
-                logic = st.selectbox("邏輯", ["AND（兩者同時）", "OR（任一滿足）"])
+                vol_days = st.number_input("均量根數 N", min_value=1, max_value=200, value=20, step=1)
+            logic = st.selectbox("條件邏輯", ["AND（兩者同時）", "OR（任一滿足）"])
 
         if st.form_submit_button("➕ 新增"):
             if not new_ticker:
@@ -433,10 +443,11 @@ with st.sidebar:
                     "price_val": price_val,
                     "use_vol":   use_vol,
                     "vol_mult":  vol_mult,
+                    "vol_days":  vol_days,
                     "logic":     logic,
                     "enabled":   True,
                 })
-                data = fetch_stock_data(new_ticker, st.session_state.kline_period)
+                data = fetch_stock_data(new_ticker, st.session_state.kline_period, vol_days)
                 if data:
                     st.session_state.market_data[new_ticker] = data
                 st.rerun()
@@ -517,8 +528,9 @@ else:
         # Build condition text
         cond_price = f"{item['price_dir']}  ${item['price_val']:.2f}"
         if item["use_vol"]:
+            n_cfg     = item.get("vol_days", 20)
             logic_str = "AND" if "AND" in item["logic"] else "OR"
-            cond_text = f"價格 {cond_price}  {logic_str}  成交量 ≥ {item['vol_mult']}× 均量"
+            cond_text = f"價格 {cond_price}  {logic_str}  成交量 ≥ {item['vol_mult']}× （{n_cfg}根均量）"
         else:
             cond_text = f"價格 {cond_price}"
 
@@ -528,7 +540,12 @@ else:
             badge_txt  = "🚨 條件觸發" if triggered else "✓ 監控中"
             dot_cls    = "dot-trig"   if triggered else "dot-ok"
             price_str  = f"${data['price']:,.2f}"
-            vol_str    = f"量比 {data['vol_ratio']:.2f}×    更新 {data['ts']}"
+            n_actual   = data.get("vol_days", item.get("vol_days", 20))
+            vol_str    = (
+                f"量比 {data['vol_ratio']:.2f}×  ｜  "
+                f"均量（{n_actual}根）{data['avg_vol']:,.0f}  ｜  "
+                f"更新 {data['ts']}"
+            )
         else:
             badge_cls  = "badge-wait"
             badge_txt  = "⏳ 等待數據"
