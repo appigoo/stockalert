@@ -128,7 +128,7 @@ INTERVAL_MAP = {
     "5m":  ("5d",  "5m"),
     "15m": ("5d",  "15m"),
     "30m": ("1mo", "30m"),
-    "1d": ("1mo", "1d"),
+    "1d": ("1y", "1d"),
     
 }
 
@@ -271,7 +271,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**監控間隔**")
     interval_choice = st.selectbox(
-        "K線週期", ["1m", "2m", "5m", "15m", "30m", "1d"], index=2, key="interval_sel"
+        "K線週期", ["1m", "2m", "5m", "15m", "30m"], index=2, key="interval_sel"
     )
     freq_map = {"1m": 60, "2m": 120, "5m": 300, "15m": 900, "30m": 1800}
     st.session_state.interval   = interval_choice
