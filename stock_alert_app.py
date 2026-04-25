@@ -128,6 +128,8 @@ INTERVAL_MAP = {
     "5m":  ("5d",  "5m"),
     "15m": ("5d",  "15m"),
     "30m": ("1mo", "30m"),
+    "1d": ("1mo", "1d"),
+    
 }
 
 def fetch_stock_data(ticker: str, interval: str):
