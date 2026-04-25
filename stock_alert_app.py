@@ -15,89 +15,179 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-#  CUSTOM CSS
+#  CSS — light, warm, rounded card style
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;500;700&display=swap');
 
 :root {
-    --bg:     #0a0e17;
-    --panel:  #111827;
-    --border: #1e3a5f;
-    --accent: #00d4ff;
-    --green:  #00ff88;
-    --red:    #ff4d6d;
-    --yellow: #ffd60a;
-    --muted:  #4a6080;
-    --text:   #ccd6f6;
+    --bg:        #f5f3ee;
+    --surface:   #ffffff;
+    --surface2:  #f0ede6;
+    --border:    #ddd9cf;
+    --accent:    #3a7d5e;
+    --accent2:   #5a9e7a;
+    --red:       #c0392b;
+    --orange:    #e07b39;
+    --yellow:    #c9a227;
+    --muted:     #9a9487;
+    --text:      #2d2a22;
+    --text2:     #6b6457;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'Noto Sans TC', sans-serif;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
     background: var(--bg) !important;
     color: var(--text) !important;
-    font-family: 'Rajdhani', sans-serif;
+    font-family: var(--sans);
 }
 [data-testid="stSidebar"] {
-    background: #0d1420 !important;
-    border-right: 1px solid var(--border);
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
 }
-h1, h2, h3 { font-family: 'Rajdhani', sans-serif; font-weight: 700; color: var(--accent); }
-h1 { font-size: 2rem; letter-spacing: 2px; text-transform: uppercase; }
+[data-testid="stSidebar"] * { font-family: var(--sans); }
 
-.metric-card {
-    background: var(--panel);
+/* typography */
+h1 { font-family: var(--sans); font-size: 1.5rem; font-weight: 700; color: var(--text); letter-spacing: .5px; }
+h2, h3 { font-family: var(--sans); font-weight: 700; color: var(--text); font-size: 1rem; }
+label { color: var(--text2) !important; font-size: 0.85rem !important; }
+
+/* cards */
+.card {
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 6px;
-    padding: 14px 18px;
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 10px;
-    font-family: 'Share Tech Mono', monospace;
 }
-.metric-card .ticker { color: var(--accent); font-size: 1.3rem; font-weight: 700; }
-.metric-card .price  { color: var(--green); font-size: 1.6rem; }
-.metric-card .vol    { color: var(--yellow); font-size: 0.9rem; }
-.status-ok   { color: var(--green); }
-.status-wait { color: var(--muted); }
-.status-trig { color: var(--red); font-weight: 700; }
-
-.alert-log {
-    background: #080d14;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 0.82rem;
-    color: var(--green);
-    max-height: 320px;
-    overflow-y: auto;
-}
-.log-warn { color: var(--yellow); }
-.log-trig { color: var(--red); font-weight: 700; }
-
-.pill-on  { background:#003322; color:var(--green); border:1px solid var(--green);
-            border-radius:20px; padding:2px 14px; font-size:0.85rem; }
-.pill-off { background:#1a0a00; color:var(--yellow); border:1px solid var(--yellow);
-            border-radius:20px; padding:2px 14px; font-size:0.85rem; }
-
-div[data-testid="stButton"] > button {
-    background: transparent;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    font-family: 'Rajdhani', sans-serif;
+.ticker-label {
+    font-family: var(--mono);
+    font-size: 1.2rem;
     font-weight: 600;
+    color: var(--text);
     letter-spacing: 1px;
-    border-radius: 4px;
-    transition: all .2s;
+}
+.price-display {
+    font-family: var(--mono);
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 4px 0;
+}
+.vol-display {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-top: 2px;
+}
+.cond-display {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text2);
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 5px 10px;
+    margin-top: 10px;
+    border-left: 3px solid var(--accent);
+}
+
+/* status badges */
+.badge {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    border-radius: 20px;
+    padding: 3px 12px;
+    font-weight: 600;
+    letter-spacing: .5px;
+}
+.badge-on    { background:#e8f5ee; color:#2e7d52; border:1px solid #b2d8c0; }
+.badge-off   { background:#fdf3e3; color:#b07c1a; border:1px solid #f0d494; }
+.badge-wait  { background:#f0ede6; color:#9a9487; border:1px solid #ddd9cf; }
+.badge-trig  { background:#fdecea; color:#c0392b; border:1px solid #f5b7b1; }
+
+/* status dot */
+.dot-ok   { color: #3a7d5e; }
+.dot-wait { color: #9a9487; }
+.dot-trig { color: #c0392b; font-weight: 700; }
+
+/* log panel */
+.log-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text2);
+    max-height: 280px;
+    overflow-y: auto;
+    line-height: 1.9;
+}
+.log-trig  { color: var(--red); }
+.log-warn  { color: var(--orange); }
+.log-info  { color: var(--text2); }
+
+/* section labels */
+.section-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    margin-top: 4px;
+}
+
+/* divider */
+.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* Streamlit overrides */
+div[data-testid="stButton"] > button {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 0.85rem;
+    border-radius: 8px;
+    padding: 4px 14px;
+    transition: all .15s;
 }
 div[data-testid="stButton"] > button:hover {
     background: var(--accent);
-    color: var(--bg);
+    color: #fff;
+    border-color: var(--accent);
+}
+div[data-testid="stButton"] > button:disabled {
+    opacity: 0.35;
+}
+.stSelectbox > div > div,
+.stNumberInput > div > div > input,
+.stTextInput > div > div > input {
+    background: var(--surface) !important;
+    border-color: var(--border) !important;
+    border-radius: 8px !important;
+    color: var(--text) !important;
+    font-family: var(--mono) !important;
+    font-size: 0.85rem !important;
 }
 div[data-testid="stSelectbox"] label,
 div[data-testid="stNumberInput"] label,
-div[data-testid="stTextInput"] label { color: var(--accent) !important; font-weight: 600; }
-hr { border-color: var(--border); }
+div[data-testid="stTextInput"] label,
+div[data-testid="stCheckbox"] label {
+    color: var(--text2) !important;
+    font-size: 0.82rem !important;
+    font-family: var(--sans) !important;
+}
+.stAlert { border-radius: 10px !important; }
 #MainMenu, footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
@@ -109,10 +199,10 @@ defaults = {
     "watchlist":       [],
     "monitoring":      False,
     "logs":            [],
-    "last_triggered":  {},    # ticker -> unix timestamp
-    "market_data":     {},    # ticker -> {price, vol_ratio, ts}
-    "interval":        "5m",
-    "check_freq":      300,
+    "last_triggered":  {},
+    "market_data":     {},
+    "kline_period":    "5m",    # yfinance interval for OHLCV data
+    "check_interval":  60,      # seconds between monitor cycles
     "last_check_time": 0.0,
 }
 for k, v in defaults.items():
@@ -120,22 +210,36 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ─────────────────────────────────────────────
-#  HELPERS
+#  CONSTANTS
 # ─────────────────────────────────────────────
-INTERVAL_MAP = {
-    "1m":  ("1d",  "1m"),
-    "2m":  ("5d",  "2m"),
-    "5m":  ("5d",  "5m"),
-    "15m": ("5d",  "15m"),
-    "30m": ("1mo", "30m"),
-    "1d": ("1y", "1d"),
-    
+# yfinance requires a matching period for each interval
+KLINE_PERIOD_MAP = {
+    "1m":  "1d",
+    "5m":  "5d",
+    "15m": "5d",
+    "30m": "1mo",
+    "1h":  "1mo",
+    "1d":  "1y",
 }
 
-def fetch_stock_data(ticker: str, interval: str):
-    period, tf = INTERVAL_MAP.get(interval, ("5d", "5m"))
+CHECK_INTERVAL_OPTIONS = {
+    "30秒":   30,
+    "1分鐘":  60,
+    "2分鐘":  120,
+    "5分鐘":  300,
+    "10分鐘": 600,
+    "15分鐘": 900,
+}
+
+KLINE_OPTIONS = ["1m", "5m", "15m", "30m", "1h", "1d"]
+
+# ─────────────────────────────────────────────
+#  HELPERS
+# ─────────────────────────────────────────────
+def fetch_stock_data(ticker: str, kline: str):
+    period = KLINE_PERIOD_MAP.get(kline, "5d")
     try:
-        hist = yf.Ticker(ticker).history(period=period, interval=tf)
+        hist = yf.Ticker(ticker).history(period=period, interval=kline)
         if hist.empty or len(hist) < 2:
             return None
         price     = float(hist["Close"].iloc[-1])
@@ -197,26 +301,25 @@ def send_telegram(message: str) -> bool:
         return False
 
 # ─────────────────────────────────────────────
-#  POLL CYCLE — called on every rerun
+#  POLL CYCLE
 # ─────────────────────────────────────────────
 def run_poll_cycle():
-    """Fetch data & check alerts. Skips if called too soon after last cycle."""
     now = time.time()
-    if now - st.session_state.last_check_time < st.session_state.check_freq:
+    if now - st.session_state.last_check_time < st.session_state.check_interval:
         return
     st.session_state.last_check_time = now
 
-    interval = st.session_state.interval
+    kline = st.session_state.kline_period
     for item in st.session_state.watchlist:
         if not item.get("enabled", True):
             continue
         ticker = item["ticker"]
-        data   = fetch_stock_data(ticker, interval)
+        data   = fetch_stock_data(ticker, kline)
 
         if data is None:
             st.session_state.logs.insert(0, {
-                "ts":   datetime.now().strftime("%H:%M:%S"),
-                "msg":  f"[警告] {ticker} 數據獲取失敗",
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "msg": f"[警告] {ticker} 數據獲取失敗",
                 "type": "warn",
             })
             continue
@@ -226,7 +329,7 @@ def run_poll_cycle():
 
         if triggered:
             last = st.session_state.last_triggered.get(ticker, 0)
-            if now - last > 300:   # 5-min cooldown
+            if now - last > 300:
                 st.session_state.last_triggered[ticker] = now
                 msg = (
                     f"🔔 <b>股票警報！</b>\n"
@@ -238,8 +341,8 @@ def run_poll_cycle():
                 )
                 ok = send_telegram(msg)
                 st.session_state.logs.insert(0, {
-                    "ts":   data["ts"],
-                    "msg":  f"[觸發] {ticker} ${data['price']:.2f} ─ {'Telegram ✓' if ok else 'Telegram 發送失敗 ✗'}",
+                    "ts": data["ts"],
+                    "msg": f"[觸發] {ticker} ${data['price']:.2f} — {'Telegram ✓' if ok else 'Telegram 失敗 ✗'}",
                     "type": "trig",
                 })
 
@@ -249,54 +352,72 @@ def run_poll_cycle():
 #  SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ⚙️ 系統設定")
-    st.markdown("---")
+    st.markdown("## 系統設定")
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
+    # ── Telegram ──
+    st.markdown('<div class="section-label">Telegram</div>', unsafe_allow_html=True)
     tok, cid = get_telegram_creds()
-    st.markdown("**Telegram 狀態**")
     if tok and cid:
-        st.markdown('<span class="pill-on">● Secrets 已設定</span>', unsafe_allow_html=True)
+        st.markdown('<span class="badge badge-on">● Secrets 已設定</span>', unsafe_allow_html=True)
     else:
-        st.markdown('<span class="pill-off">● Secrets 未設定</span>', unsafe_allow_html=True)
-
+        st.markdown('<span class="badge badge-off">● Secrets 未設定</span>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("📨 發送測試訊息"):
-        if not tok:
-            st.error("未找到 TELEGRAM_BOT_TOKEN")
-        elif not cid:
-            st.error("未找到 TELEGRAM_CHAT_ID")
+        if not tok or not cid:
+            st.error("請先設定 Streamlit Secrets")
         else:
             ok = send_telegram("✅ <b>股票警報系統</b>\n測試訊息發送成功！")
             st.success("發送成功！") if ok else st.error("發送失敗，請檢查 Token/Chat ID")
 
-    st.markdown("---")
-    st.markdown("**監控間隔**")
-    interval_choice = st.selectbox(
-        "K線週期", ["1m", "2m", "5m", "15m", "30m"], index=2, key="interval_sel"
-    )
-    freq_map = {"1m": 60, "2m": 120, "5m": 300, "15m": 900, "30m": 1800}
-    st.session_state.interval   = interval_choice
-    st.session_state.check_freq = freq_map[interval_choice]
-    st.caption(f"每 {st.session_state.check_freq // 60} 分鐘輪詢一次")
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("**新增股票警報**")
+    # ── Monitoring interval (separate from K-line) ──
+    st.markdown('<div class="section-label">監控間隔（多久檢查一次）</div>', unsafe_allow_html=True)
+    check_label = st.selectbox(
+        "檢查頻率",
+        list(CHECK_INTERVAL_OPTIONS.keys()),
+        index=1,   # default 1分鐘
+        key="check_interval_sel",
+        label_visibility="collapsed",
+    )
+    st.session_state.check_interval = CHECK_INTERVAL_OPTIONS[check_label]
+    st.caption(f"每 {check_label} 向 yfinance 查詢一次")
+
+    st.markdown('<br>', unsafe_allow_html=True)
+
+    # ── K-line period (separate) ──
+    st.markdown('<div class="section-label">K線週期（數據 Timeframe）</div>', unsafe_allow_html=True)
+    kline_choice = st.selectbox(
+        "K線週期",
+        KLINE_OPTIONS,
+        index=1,   # default 5m
+        key="kline_sel",
+        label_visibility="collapsed",
+    )
+    st.session_state.kline_period = kline_choice
+    st.caption(f"使用 yfinance {kline_choice} K線數據計算條件")
+
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+    # ── Add stock ──
+    st.markdown('<div class="section-label">新增股票警報</div>', unsafe_allow_html=True)
 
     with st.form("add_stock_form", clear_on_submit=True):
-        new_ticker = st.text_input("股票代號", placeholder="例如 TSLA").upper().strip()
+        new_ticker = st.text_input("股票代號", placeholder="TSLA").upper().strip()
 
-        st.markdown("**價格條件**")
         c1, c2 = st.columns(2)
         with c1:
-            price_dir = st.selectbox("方向", ["高於 >", "低於 <"])
+            price_dir = st.selectbox("價格方向", ["高於 >", "低於 <"])
         with c2:
-            price_val = st.number_input("價格 ($)", min_value=0.01, value=400.0, step=1.0)
+            price_val = st.number_input("目標價 ($)", min_value=0.01, value=400.0, step=1.0)
 
-        use_vol = st.checkbox("加入成交量條件", value=True)
+        use_vol = st.checkbox("＋成交量條件", value=True)
         vol_mult, logic = 2.0, "AND（兩者同時）"
         if use_vol:
             c3, c4 = st.columns(2)
             with c3:
-                vol_mult = st.number_input("量比 (x 均量)", min_value=1.0, value=2.0, step=0.5)
+                vol_mult = st.number_input("量比 (×均量)", min_value=1.0, value=2.0, step=0.5)
             with c4:
                 logic = st.selectbox("邏輯", ["AND（兩者同時）", "OR（任一滿足）"])
 
@@ -304,7 +425,7 @@ with st.sidebar:
             if not new_ticker:
                 st.error("請輸入股票代號")
             elif any(w["ticker"] == new_ticker for w in st.session_state.watchlist):
-                st.warning(f"{new_ticker} 已在監控列表中")
+                st.warning(f"{new_ticker} 已在列表中")
             else:
                 st.session_state.watchlist.append({
                     "ticker":    new_ticker,
@@ -315,8 +436,7 @@ with st.sidebar:
                     "logic":     logic,
                     "enabled":   True,
                 })
-                # Immediately fetch so the card shows data right away
-                data = fetch_stock_data(new_ticker, st.session_state.interval)
+                data = fetch_stock_data(new_ticker, st.session_state.kline_period)
                 if data:
                     st.session_state.market_data[new_ticker] = data
                 st.rerun()
@@ -324,124 +444,155 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 #  MAIN PANEL
 # ─────────────────────────────────────────────
-st.markdown("# 🔔 股票即時警報系統")
+
+# ── Header ──
+col_title, col_status = st.columns([3, 1])
+with col_title:
+    st.markdown("# 🔔 股票警報系統")
 
 elapsed   = time.time() - st.session_state.last_check_time
-remaining = max(0, st.session_state.check_freq - elapsed)
-if st.session_state.last_check_time == 0:
-    timing_info = "尚未開始"
-elif st.session_state.monitoring:
-    timing_info = f"下次刷新：{int(remaining // 60)}分 {int(remaining % 60)}秒後"
+remaining = max(0, st.session_state.check_interval - elapsed)
+
+with col_status:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.session_state.monitoring:
+        st.markdown(f'<span class="badge badge-on">● 監控中</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="badge badge-off">● 已停止</span>', unsafe_allow_html=True)
+
+# ── Config summary bar ──
+kline_lbl   = st.session_state.kline_period
+check_lbl   = [k for k, v in CHECK_INTERVAL_OPTIONS.items() if v == st.session_state.check_interval][0]
+if st.session_state.monitoring and st.session_state.last_check_time > 0:
+    next_str = f"下次更新：{int(remaining // 60)}分 {int(remaining % 60)}秒後"
+elif st.session_state.last_check_time == 0:
+    next_str = "尚未開始"
 else:
-    timing_info = "已停止"
+    next_str = "已停止"
 
-st.markdown(f"資料來源：**yfinance** ｜ 週期：**{st.session_state.interval}** ｜ {timing_info}")
-st.markdown("---")
+st.markdown(
+    f'<div style="font-family:var(--mono);font-size:0.8rem;color:var(--muted);margin-bottom:16px;">'
+    f'K線週期：<b style="color:var(--text2)">{kline_lbl}</b> &nbsp;｜&nbsp; '
+    f'監控間隔：<b style="color:var(--text2)">{check_lbl}</b> &nbsp;｜&nbsp; '
+    f'{next_str}</div>',
+    unsafe_allow_html=True,
+)
 
-# Start / Stop buttons
-ca, cb, cc = st.columns([1, 1, 4])
-with ca:
-    if st.button("▶ 開始監控", disabled=st.session_state.monitoring):
+# ── Control buttons ──
+cb1, cb2, cb3 = st.columns([1, 1, 5])
+with cb1:
+    if st.button("▶ 開始", disabled=st.session_state.monitoring):
         if not st.session_state.watchlist:
-            st.error("請先在側欄新增至少一隻股票")
+            st.error("請先新增股票")
         else:
             st.session_state.monitoring      = True
-            st.session_state.last_check_time = 0.0   # force immediate first poll
+            st.session_state.last_check_time = 0.0
             st.rerun()
-
-with cb:
-    if st.button("⏹ 停止監控", disabled=not st.session_state.monitoring):
+with cb2:
+    if st.button("⏹ 停止", disabled=not st.session_state.monitoring):
         st.session_state.monitoring = False
         st.rerun()
 
-with cc:
-    label = '<span class="pill-on">● 監控中</span>' if st.session_state.monitoring \
-            else '<span class="pill-off">● 已停止</span>'
-    st.markdown(label, unsafe_allow_html=True)
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-st.markdown("---")
-
-# ── Run poll cycle (only does real work when interval has elapsed) ──
+# ── Poll cycle ──
 if st.session_state.monitoring:
     run_poll_cycle()
 
-# ── Watchlist cards ──
+# ── Watchlist ──
 if not st.session_state.watchlist:
-    st.info("👈 請在左側側欄新增要監控的股票")
+    st.markdown(
+        '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">'
+        '← 請在左側新增要監控的股票'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 else:
-    st.markdown("### 📋 監控列表")
+    st.markdown('<div class="section-label">監控列表</div>', unsafe_allow_html=True)
+
     for i, item in enumerate(st.session_state.watchlist):
         ticker = item["ticker"]
         data   = st.session_state.market_data.get(ticker)
 
-        cond_price = f"價格 {item['price_dir']} ${item['price_val']:.2f}"
+        # Build condition text
+        cond_price = f"{item['price_dir']}  ${item['price_val']:.2f}"
         if item["use_vol"]:
             logic_str = "AND" if "AND" in item["logic"] else "OR"
-            cond_full = f"{cond_price}  <b>{logic_str}</b>  成交量 ≥ {item['vol_mult']}x 均量"
+            cond_text = f"價格 {cond_price}  {logic_str}  成交量 ≥ {item['vol_mult']}× 均量"
         else:
-            cond_full = cond_price
+            cond_text = f"價格 {cond_price}"
 
         if data:
             triggered, _ = check_conditions(item, data)
-            status_cls = "status-trig" if triggered else "status-ok"
-            status_txt = "🚨 條件觸發！" if triggered else "✅ 監控中"
-            price_str  = f"${data['price']:.2f}"
-            vol_str    = f"成交量比率：{data['vol_ratio']:.1f}x ｜ 更新：{data['ts']}"
+            badge_cls  = "badge-trig" if triggered else "badge-on"
+            badge_txt  = "🚨 條件觸發" if triggered else "✓ 監控中"
+            dot_cls    = "dot-trig"   if triggered else "dot-ok"
+            price_str  = f"${data['price']:,.2f}"
+            vol_str    = f"量比 {data['vol_ratio']:.2f}×    更新 {data['ts']}"
         else:
-            status_cls = "status-wait"
-            status_txt = "⏳ 等待數據..."
+            badge_cls  = "badge-wait"
+            badge_txt  = "⏳ 等待數據"
+            dot_cls    = "dot-wait"
             price_str  = "—"
-            vol_str    = "點擊「開始監控」後自動獲取數據"
+            vol_str    = "開始監控後自動載入"
 
-        enabled_icon = "🟢" if item["enabled"] else "⚫"
+        enabled_dot = "●" if item["enabled"] else "○"
+        enabled_col = "var(--accent)" if item["enabled"] else "var(--muted)"
 
         st.markdown(f"""
-        <div class="metric-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="ticker">{enabled_icon} {ticker}</span>
-                <span class="{status_cls}">{status_txt}</span>
+        <div class="card">
+            <div class="card-header">
+                <span class="ticker-label">
+                    <span style="color:{enabled_col};font-size:0.9rem;">{enabled_dot}</span>
+                    &nbsp;{ticker}
+                </span>
+                <span class="badge {badge_cls}">{badge_txt}</span>
             </div>
-            <div class="price">{price_str}</div>
-            <div class="vol">{vol_str}</div>
-            <div style="margin-top:6px;font-size:0.82rem;color:#4a9eba;">條件：{cond_full}</div>
+            <div class="price-display">{price_str}</div>
+            <div class="vol-display">{vol_str}</div>
+            <div class="cond-display">條件：{cond_text}</div>
         </div>
         """, unsafe_allow_html=True)
 
-        ce, cd, _ = st.columns([1, 1, 6])
-        with ce:
-            if st.button("暫停" if item["enabled"] else "啟用", key=f"tog_{i}"):
+        btn1, btn2, _ = st.columns([1, 1, 6])
+        with btn1:
+            lbl = "暫停" if item["enabled"] else "啟用"
+            if st.button(lbl, key=f"tog_{i}"):
                 st.session_state.watchlist[i]["enabled"] = not item["enabled"]
                 st.rerun()
-        with cd:
-            if st.button("🗑 刪除", key=f"del_{i}"):
+        with btn2:
+            if st.button("刪除", key=f"del_{i}"):
                 st.session_state.watchlist.pop(i)
                 st.session_state.market_data.pop(ticker, None)
                 st.rerun()
 
 # ── Alert log ──
-st.markdown("---")
-st.markdown("### 📜 警報記錄")
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
+log_col, clr_col = st.columns([5, 1])
+with log_col:
+    st.markdown('<div class="section-label">警報記錄</div>', unsafe_allow_html=True)
+with clr_col:
+    if st.session_state.logs:
+        if st.button("清除"):
+            st.session_state.logs = []
+            st.rerun()
 
 if st.session_state.logs:
-    if st.button("🗑 清除記錄"):
-        st.session_state.logs = []
-        st.rerun()
-    parts = []
-    for e in st.session_state.logs[:50]:
-        cls = "log-trig" if e["type"] == "trig" else ("log-warn" if e["type"] == "warn" else "")
-        parts.append(f'<div class="{cls}">[{e["ts"]}] {e["msg"]}</div>')
-    st.markdown(f'<div class="alert-log">{"".join(parts)}</div>', unsafe_allow_html=True)
+    rows = []
+    for e in st.session_state.logs[:60]:
+        cls = "log-trig" if e["type"] == "trig" else ("log-warn" if e["type"] == "warn" else "log-info")
+        rows.append(f'<div class="{cls}">[{e["ts"]}]&nbsp;&nbsp;{e["msg"]}</div>')
+    st.markdown(f'<div class="log-panel">{"".join(rows)}</div>', unsafe_allow_html=True)
 else:
     st.markdown(
-        '<div class="alert-log"><span style="color:#4a6080">— 尚無記錄 —</span></div>',
+        '<div class="log-panel" style="color:var(--muted);text-align:center;padding:30px 0;">— 尚無警報記錄 —</div>',
         unsafe_allow_html=True,
     )
 
-# ── Auto-rerun loop: wake up when next poll is due ──
+# ── Auto-rerun loop ──
 if st.session_state.monitoring:
     elapsed   = time.time() - st.session_state.last_check_time
-    sleep_sec = max(5, st.session_state.check_freq - elapsed)
-    # sleep_sec is how long until the next poll is needed;
-    # we sleep briefly here so the page stays "live" and reruns itself
-    time.sleep(min(sleep_sec, 30))  # wake up every 30s at most to refresh countdown
+    sleep_sec = max(5, st.session_state.check_interval - elapsed)
+    time.sleep(min(sleep_sec, 20))
     st.rerun()
