@@ -316,28 +316,45 @@ def run_poll_cycle():
     st.session_state.last_check_time = now
 
     kline = st.session_state.kline_period
-    for item in st.session_state.watchlist:
-        if not item.get("enabled", True):
-            continue
-        ticker = item["ticker"]
-        vol_days = item.get("vol_days", 20)
-        data     = fetch_stock_data(ticker, kline, vol_days)
 
+    # Batch fetch: one yfinance call per unique ticker (shared across alerts)
+    unique_tickers = list({item["ticker"] for item in st.session_state.watchlist if item.get("enabled", True)})
+    for ticker in unique_tickers:
+        # Use the largest vol_days among all alerts for this ticker so all alerts have enough data
+        days_needed = max(
+            (item.get("vol_days", 20) for item in st.session_state.watchlist
+             if item["ticker"] == ticker and item.get("enabled", True)),
+            default=20,
+        )
+        data = fetch_stock_data(ticker, kline, days_needed)
         if data is None:
             st.session_state.logs.insert(0, {
                 "ts": datetime.now().strftime("%H:%M:%S"),
                 "msg": f"[警告] {ticker} 數據獲取失敗",
                 "type": "warn",
             })
+        else:
+            st.session_state.market_data[ticker] = data
+
+    # Now check conditions per alert (each alert has its own cooldown via its id)
+    for item in st.session_state.watchlist:
+        if not item.get("enabled", True):
+            continue
+        ticker   = item["ticker"]
+        alert_id = item.get("id", id(item))
+        vol_days = item.get("vol_days", 20)
+        data     = st.session_state.market_data.get(ticker)
+        if data is None:
             continue
 
-        st.session_state.market_data[ticker] = data
+        # Recompute vol_ratio using this alert's specific N if different from fetched
+        actual_n = data.get("vol_days", vol_days)
         triggered, desc = check_conditions(item, data)
 
         if triggered:
-            last = st.session_state.last_triggered.get(ticker, 0)
+            last = st.session_state.last_triggered.get(alert_id, 0)
             if now - last > 300:
-                st.session_state.last_triggered[ticker] = now
+                st.session_state.last_triggered[alert_id] = now
                 n_actual = data.get("vol_days", vol_days)
                 msg = (
                     f"🔔 <b>股票警報！</b>\n"
@@ -351,7 +368,7 @@ def run_poll_cycle():
                 ok = send_telegram(msg)
                 st.session_state.logs.insert(0, {
                     "ts": data["ts"],
-                    "msg": f"[觸發] {ticker} ${data['price']:.2f} — {'Telegram ✓' if ok else 'Telegram 失敗 ✗'}",
+                    "msg": f"[觸發] {ticker} #{alert_id} ${data['price']:.2f} — {'Telegram ✓' if ok else 'Telegram 失敗 ✗'}",
                     "type": "trig",
                 })
 
@@ -434,10 +451,10 @@ with st.sidebar:
         if st.form_submit_button("➕ 新增"):
             if not new_ticker:
                 st.error("請輸入股票代號")
-            elif any(w["ticker"] == new_ticker for w in st.session_state.watchlist):
-                st.warning(f"{new_ticker} 已在列表中")
             else:
+                alert_id = int(time.time() * 1000)
                 st.session_state.watchlist.append({
+                    "id":        alert_id,
                     "ticker":    new_ticker,
                     "price_dir": price_dir,
                     "price_val": price_val,
@@ -521,9 +538,26 @@ if not st.session_state.watchlist:
 else:
     st.markdown('<div class="section-label">監控列表</div>', unsafe_allow_html=True)
 
+    # Count how many alerts exist per ticker for sub-labelling
+    ticker_counts = {}
+    ticker_seq    = {}   # item id -> "#N" label
+    for item in st.session_state.watchlist:
+        t = item["ticker"]
+        ticker_counts[t] = ticker_counts.get(t, 0) + 1
+    seq_tracker = {}
+    for item in st.session_state.watchlist:
+        t = item["ticker"]
+        seq_tracker[t] = seq_tracker.get(t, 0) + 1
+        ticker_seq[item.get("id", id(item))] = seq_tracker[t] if ticker_counts[t] > 1 else None
+
     for i, item in enumerate(st.session_state.watchlist):
-        ticker = item["ticker"]
-        data   = st.session_state.market_data.get(ticker)
+        ticker   = item["ticker"]
+        alert_id = item.get("id", i)
+        data     = st.session_state.market_data.get(ticker)
+
+        # Sub-label (#1, #2 …) only when same ticker appears more than once
+        seq_label = ticker_seq.get(alert_id)
+        display_ticker = f"{ticker} <span style='font-size:0.8rem;color:var(--muted)'>#{seq_label}</span>" if seq_label else ticker
 
         # Build condition text
         cond_price = f"{item['price_dir']}  ${item['price_val']:.2f}"
@@ -561,7 +595,7 @@ else:
             <div class="card-header">
                 <span class="ticker-label">
                     <span style="color:{enabled_col};font-size:0.9rem;">{enabled_dot}</span>
-                    &nbsp;{ticker}
+                    &nbsp;{display_ticker}
                 </span>
                 <span class="badge {badge_cls}">{badge_txt}</span>
             </div>
@@ -574,13 +608,15 @@ else:
         btn1, btn2, _ = st.columns([1, 1, 6])
         with btn1:
             lbl = "暫停" if item["enabled"] else "啟用"
-            if st.button(lbl, key=f"tog_{i}"):
+            if st.button(lbl, key=f"tog_{alert_id}"):
                 st.session_state.watchlist[i]["enabled"] = not item["enabled"]
                 st.rerun()
         with btn2:
-            if st.button("刪除", key=f"del_{i}"):
+            if st.button("刪除", key=f"del_{alert_id}"):
                 st.session_state.watchlist.pop(i)
-                st.session_state.market_data.pop(ticker, None)
+                # Only remove market_data if no other alert uses the same ticker
+                if not any(w["ticker"] == ticker for w in st.session_state.watchlist):
+                    st.session_state.market_data.pop(ticker, None)
                 st.rerun()
 
 # ── Alert log ──
