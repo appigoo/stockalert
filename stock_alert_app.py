@@ -197,31 +197,27 @@ div[data-testid="stCheckbox"] label {
 # ─────────────────────────────────────────────
 #  LOCAL STORAGE  (browser-side persistence)
 # ─────────────────────────────────────────────
+# streamlit_js_eval is ASYNC: on first rerun it returns None while the browser
+# fetches the value. We must keep retrying until we get a real response,
+# only then mark loading as done. Using a fixed key="load_config" is essential
+# so Streamlit caches/deduplicates the JS call correctly across reruns.
+
 PERSIST_KEYS = ["watchlist", "kline_period", "check_interval"]
 
 def save_to_storage():
-    """Write persisted keys to browser localStorage via JS."""
+    """Persist current config to browser localStorage."""
     payload = {k: st.session_state[k] for k in PERSIST_KEYS if k in st.session_state}
-    js_code = f"localStorage.setItem('stock_alert_config', JSON.stringify({json.dumps(payload)}));"
-    streamlit_js_eval(js_expressions=js_code, key=f"save_{int(time.time()*1000)}")
-
-def load_from_storage():
-    """Read persisted config from localStorage via JS."""
-    raw = streamlit_js_eval(
-        js_expressions="localStorage.getItem('stock_alert_config')",
-        key="load_config",
+    encoded = json.dumps(payload, ensure_ascii=False)
+    # Use a timestamp in the key so every save triggers a fresh JS evaluation
+    streamlit_js_eval(
+        js_expressions=f"localStorage.setItem('stock_alert_config', {json.dumps(encoded)}); true;",
+        key=f"save_{int(time.time()*1000)}",
     )
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw) if isinstance(raw, str) else raw
-    except Exception:
-        return {}
 
 def clear_storage():
-    """Delete persisted config from localStorage."""
+    """Remove persisted config from browser localStorage."""
     streamlit_js_eval(
-        js_expressions="localStorage.removeItem('stock_alert_config');",
+        js_expressions="localStorage.removeItem('stock_alert_config'); true;",
         key=f"clear_{int(time.time()*1000)}",
     )
 
@@ -237,20 +233,33 @@ defaults = {
     "kline_period":    "5m",
     "check_interval":  60,
     "last_check_time": 0.0,
-    "_storage_loaded": False,   # flag: localStorage already applied this session
+    "_storage_loaded": False,  # True only after a non-None response from localStorage
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Load from localStorage once per browser session
+# ── Async localStorage load ──────────────────
+# streamlit_js_eval returns None on the very first rerun (JS hasn't responded yet).
+# We call it on EVERY rerun with the SAME key until we get a string back.
+# Once we receive a value (even "null" string = no saved data), we stop retrying.
 if not st.session_state["_storage_loaded"]:
-    saved = load_from_storage()
-    if saved:
-        for k in PERSIST_KEYS:
-            if k in saved:
-                st.session_state[k] = saved[k]
-    st.session_state["_storage_loaded"] = True
+    _raw = streamlit_js_eval(
+        js_expressions="localStorage.getItem('stock_alert_config')",
+        key="load_config",   # fixed key = same JS call, result cached by Streamlit
+    )
+    if _raw is not None:               # None means JS hasn't replied yet → retry next rerun
+        if isinstance(_raw, str) and _raw not in ("", "null"):
+            try:
+                _saved = json.loads(_raw)
+                for k in PERSIST_KEYS:
+                    if k in _saved:
+                        st.session_state[k] = _saved[k]
+            except Exception:
+                pass
+        st.session_state["_storage_loaded"] = True
+        # If localStorage had data, rerun once more so the UI renders with restored state
+        st.rerun()
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
