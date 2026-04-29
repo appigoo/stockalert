@@ -4,7 +4,6 @@ import requests
 import time
 import json
 from datetime import datetime
-from streamlit_js_eval import streamlit_js_eval
 
 # ─────────────────────────────────────────────
 #  PAGE CONFIG
@@ -195,31 +194,40 @@ div[data-testid="stCheckbox"] label {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-#  LOCAL STORAGE  (browser-side persistence)
+#  FILE-BASED PERSISTENCE  (/tmp — no JS, no extra packages)
 # ─────────────────────────────────────────────
-# streamlit_js_eval is ASYNC: on first rerun it returns None while the browser
-# fetches the value. We must keep retrying until we get a real response,
-# only then mark loading as done. Using a fixed key="load_config" is essential
-# so Streamlit caches/deduplicates the JS call correctly across reruns.
+# /tmp persists across Streamlit hot-reloads and user page refreshes
+# within the same Streamlit Cloud container session.
+# It is the most reliable zero-dependency approach available on Streamlit Cloud.
 
-PERSIST_KEYS = ["watchlist", "kline_period", "check_interval"]
+import os, pathlib
+
+PERSIST_KEYS  = ["watchlist", "kline_period", "check_interval"]
+SAVE_PATH     = pathlib.Path("/tmp/stock_alert_config.json")
 
 def save_to_storage():
-    """Persist current config to browser localStorage."""
+    """Write config to /tmp as JSON."""
     payload = {k: st.session_state[k] for k in PERSIST_KEYS if k in st.session_state}
-    encoded = json.dumps(payload, ensure_ascii=False)
-    # Use a timestamp in the key so every save triggers a fresh JS evaluation
-    streamlit_js_eval(
-        js_expressions=f"localStorage.setItem('stock_alert_config', {json.dumps(encoded)}); true;",
-        key=f"save_{int(time.time()*1000)}",
-    )
+    try:
+        SAVE_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+def load_from_storage() -> dict:
+    """Read config from /tmp. Returns {} if file missing or corrupt."""
+    try:
+        if SAVE_PATH.exists():
+            return json.loads(SAVE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
 
 def clear_storage():
-    """Remove persisted config from browser localStorage."""
-    streamlit_js_eval(
-        js_expressions="localStorage.removeItem('stock_alert_config'); true;",
-        key=f"clear_{int(time.time()*1000)}",
-    )
+    """Delete the saved config file."""
+    try:
+        SAVE_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 # ─────────────────────────────────────────────
 #  SESSION STATE
@@ -233,33 +241,19 @@ defaults = {
     "kline_period":    "5m",
     "check_interval":  60,
     "last_check_time": 0.0,
-    "_storage_loaded": False,  # True only after a non-None response from localStorage
+    "_storage_loaded": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ── Async localStorage load ──────────────────
-# streamlit_js_eval returns None on the very first rerun (JS hasn't responded yet).
-# We call it on EVERY rerun with the SAME key until we get a string back.
-# Once we receive a value (even "null" string = no saved data), we stop retrying.
+# Load once per Python session (not per rerun) — no async, no flicker
 if not st.session_state["_storage_loaded"]:
-    _raw = streamlit_js_eval(
-        js_expressions="localStorage.getItem('stock_alert_config')",
-        key="load_config",   # fixed key = same JS call, result cached by Streamlit
-    )
-    if _raw is not None:               # None means JS hasn't replied yet → retry next rerun
-        if isinstance(_raw, str) and _raw not in ("", "null"):
-            try:
-                _saved = json.loads(_raw)
-                for k in PERSIST_KEYS:
-                    if k in _saved:
-                        st.session_state[k] = _saved[k]
-            except Exception:
-                pass
-        st.session_state["_storage_loaded"] = True
-        # If localStorage had data, rerun once more so the UI renders with restored state
-        st.rerun()
+    _saved = load_from_storage()
+    for k in PERSIST_KEYS:
+        if k in _saved:
+            st.session_state[k] = _saved[k]
+    st.session_state["_storage_loaded"] = True
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
