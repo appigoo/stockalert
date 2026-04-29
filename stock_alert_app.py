@@ -200,7 +200,7 @@ div[data-testid="stCheckbox"] label {
 # within the same Streamlit Cloud container session.
 # It is the most reliable zero-dependency approach available on Streamlit Cloud.
 
-import os, pathlib
+import os, pathlib, html
 
 PERSIST_KEYS  = ["watchlist", "kline_period", "check_interval"]
 SAVE_PATH         = pathlib.Path("/tmp/stock_alert_config.json")
@@ -444,13 +444,15 @@ def run_poll_cycle():
                 # Persist cooldown immediately so restarts don't re-trigger
                 _persist_triggered()
                 n_actual = data.get("vol_days", vol_days)
+                safe_desc   = html.escape(desc)
+                safe_ticker = html.escape(ticker)
                 msg = (
                     f"🔔 <b>股票警報！</b>\n"
-                    f"📌 股票：<b>{ticker}</b>\n"
+                    f"📌 股票：<b>{safe_ticker}</b>\n"
                     f"💰 價格：${data['price']:.2f}\n"
                     f"📊 成交量：{data['volume']:,.0f}  (均量 {data['avg_vol']:,.0f}，{n_actual} 根)\n"
                     f"📈 量比：{data['vol_ratio']:.2f}x\n"
-                    f"✅ 條件：{desc}\n"
+                    f"✅ 條件：{safe_desc}\n"
                     f"🕐 時間：{data['ts']}"
                 )
                 ok, err = send_telegram(msg)
