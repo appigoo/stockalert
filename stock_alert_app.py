@@ -2,7 +2,9 @@ import streamlit as st
 import yfinance as yf
 import requests
 import time
+import json
 from datetime import datetime
+from streamlit_local_storage import LocalStorage
 
 # ─────────────────────────────────────────────
 #  PAGE CONFIG
@@ -193,6 +195,29 @@ div[data-testid="stCheckbox"] label {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
+#  LOCAL STORAGE  (browser-side persistence)
+# ─────────────────────────────────────────────
+_ls = LocalStorage()
+
+# Keys we persist to localStorage
+PERSIST_KEYS = ["watchlist", "kline_period", "check_interval"]
+
+def save_to_storage():
+    """Write persisted keys to browser localStorage."""
+    payload = {k: st.session_state[k] for k in PERSIST_KEYS if k in st.session_state}
+    _ls.setItem("stock_alert_config", json.dumps(payload))
+
+def load_from_storage():
+    """Read persisted config from localStorage (runs once on first load)."""
+    raw = _ls.getItem("stock_alert_config")
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return {}
+
+# ─────────────────────────────────────────────
 #  SESSION STATE
 # ─────────────────────────────────────────────
 defaults = {
@@ -201,13 +226,23 @@ defaults = {
     "logs":            [],
     "last_triggered":  {},
     "market_data":     {},
-    "kline_period":    "5m",    # yfinance interval for OHLCV data
-    "check_interval":  60,      # seconds between monitor cycles
+    "kline_period":    "5m",
+    "check_interval":  60,
     "last_check_time": 0.0,
+    "_storage_loaded": False,   # flag: localStorage already applied this session
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# Load from localStorage once per browser session
+if not st.session_state["_storage_loaded"]:
+    saved = load_from_storage()
+    if saved:
+        for k in PERSIST_KEYS:
+            if k in saved:
+                st.session_state[k] = saved[k]
+    st.session_state["_storage_loaded"] = True
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
@@ -398,6 +433,27 @@ with st.sidebar:
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
+    # ── Saved config status ──
+    st.markdown('<div class="section-label">記憶設定</div>', unsafe_allow_html=True)
+    saved_count = len(st.session_state.get("watchlist", []))
+    if saved_count > 0:
+        st.markdown(
+            f'<span class="badge badge-on">● 已記憶 {saved_count} 個警報</span>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<span class="badge badge-wait">● 尚無記憶設定</span>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🗑 清除所有記憶"):
+        _ls.deleteItem("stock_alert_config")
+        st.session_state.watchlist      = []
+        st.session_state.market_data    = {}
+        st.session_state.last_triggered = {}
+        st.session_state.monitoring     = False
+        st.rerun()
+
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
+
     # ── Monitoring interval (separate from K-line) ──
     st.markdown('<div class="section-label">監控間隔（多久檢查一次）</div>', unsafe_allow_html=True)
     check_label = st.selectbox(
@@ -408,6 +464,7 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.session_state.check_interval = CHECK_INTERVAL_OPTIONS[check_label]
+    save_to_storage()
     st.caption(f"每 {check_label} 向 yfinance 查詢一次")
 
     st.markdown('<br>', unsafe_allow_html=True)
@@ -422,6 +479,7 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.session_state.kline_period = kline_choice
+    save_to_storage()
     st.caption(f"使用 yfinance {kline_choice} K線數據計算條件")
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -467,6 +525,7 @@ with st.sidebar:
                 data = fetch_stock_data(new_ticker, st.session_state.kline_period, vol_days)
                 if data:
                     st.session_state.market_data[new_ticker] = data
+                save_to_storage()
                 st.rerun()
 
 # ─────────────────────────────────────────────
@@ -610,13 +669,14 @@ else:
             lbl = "暫停" if item["enabled"] else "啟用"
             if st.button(lbl, key=f"tog_{alert_id}"):
                 st.session_state.watchlist[i]["enabled"] = not item["enabled"]
+                save_to_storage()
                 st.rerun()
         with btn2:
             if st.button("刪除", key=f"del_{alert_id}"):
                 st.session_state.watchlist.pop(i)
-                # Only remove market_data if no other alert uses the same ticker
                 if not any(w["ticker"] == ticker for w in st.session_state.watchlist):
                     st.session_state.market_data.pop(ticker, None)
+                save_to_storage()
                 st.rerun()
 
 # ── Alert log ──
