@@ -203,7 +203,8 @@ div[data-testid="stCheckbox"] label {
 import os, pathlib
 
 PERSIST_KEYS  = ["watchlist", "kline_period", "check_interval"]
-SAVE_PATH     = pathlib.Path("/tmp/stock_alert_config.json")
+SAVE_PATH         = pathlib.Path("/tmp/stock_alert_config.json")
+TRIGGERED_PATH    = pathlib.Path("/tmp/stock_alert_triggered.json")
 
 def save_to_storage():
     """Write config to /tmp as JSON."""
@@ -223,11 +224,32 @@ def load_from_storage() -> dict:
     return {}
 
 def clear_storage():
-    """Delete the saved config file."""
+    """Delete all saved files."""
     try:
         SAVE_PATH.unlink(missing_ok=True)
+        TRIGGERED_PATH.unlink(missing_ok=True)
     except Exception:
         pass
+
+def _persist_triggered():
+    """Write last_triggered dict to /tmp so cooldowns survive restarts."""
+    try:
+        TRIGGERED_PATH.write_text(
+            json.dumps(st.session_state.last_triggered), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+def _load_triggered() -> dict:
+    """Load last_triggered from /tmp. Prune entries older than 10 min."""
+    try:
+        if TRIGGERED_PATH.exists():
+            raw  = json.loads(TRIGGERED_PATH.read_text(encoding="utf-8"))
+            cutoff = time.time() - 600   # discard entries older than 10 min
+            return {k: v for k, v in raw.items() if v > cutoff}
+    except Exception:
+        pass
+    return {}
 
 # ─────────────────────────────────────────────
 #  SESSION STATE
@@ -253,6 +275,8 @@ if not st.session_state["_storage_loaded"]:
     for k in PERSIST_KEYS:
         if k in _saved:
             st.session_state[k] = _saved[k]
+    # Also restore cooldown timestamps so we don't re-alert right after restart
+    st.session_state["last_triggered"] = _load_triggered()
     st.session_state["_storage_loaded"] = True
 
 # ─────────────────────────────────────────────
@@ -338,19 +362,33 @@ def get_telegram_creds():
     except Exception:
         return None, None
 
-def send_telegram(message: str) -> bool:
+def send_telegram(message: str) -> tuple:
+    """Returns (success: bool, error_detail: str)."""
     token, chat_id = get_telegram_creds()
-    if not token or not chat_id:
-        return False
+    if not token:
+        return False, "Secrets 未設定 TELEGRAM_BOT_TOKEN"
+    if not chat_id:
+        return False, "Secrets 未設定 TELEGRAM_CHAT_ID"
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-            timeout=10,
+            timeout=15,
         )
-        return r.status_code == 200
-    except Exception:
-        return False
+        if r.status_code == 200:
+            return True, ""
+        else:
+            try:
+                detail = r.json().get("description", r.text[:120])
+            except Exception:
+                detail = r.text[:120]
+            return False, f"HTTP {r.status_code}: {detail}"
+    except requests.exceptions.ConnectionError as e:
+        return False, f"連線失敗（網絡封鎖？）: {str(e)[:80]}"
+    except requests.exceptions.Timeout:
+        return False, "請求超時 (15s)"
+    except Exception as e:
+        return False, str(e)[:100]
 
 # ─────────────────────────────────────────────
 #  POLL CYCLE
@@ -398,9 +436,13 @@ def run_poll_cycle():
         triggered, desc = check_conditions(item, data)
 
         if triggered:
-            last = st.session_state.last_triggered.get(alert_id, 0)
+            # Use str(alert_id) as key — last_triggered is loaded from file as str keys
+            aid_key = str(alert_id)
+            last = st.session_state.last_triggered.get(aid_key, 0)
             if now - last > 300:
-                st.session_state.last_triggered[alert_id] = now
+                st.session_state.last_triggered[aid_key] = now
+                # Persist cooldown immediately so restarts don't re-trigger
+                _persist_triggered()
                 n_actual = data.get("vol_days", vol_days)
                 msg = (
                     f"🔔 <b>股票警報！</b>\n"
@@ -411,11 +453,16 @@ def run_poll_cycle():
                     f"✅ 條件：{desc}\n"
                     f"🕐 時間：{data['ts']}"
                 )
-                ok = send_telegram(msg)
+                ok, err = send_telegram(msg)
+                log_msg = (
+                    f"[觸發] {ticker} ${data['price']:.2f} — Telegram ✓"
+                    if ok else
+                    f"[觸發] {ticker} ${data['price']:.2f} — 失敗：{err}"
+                )
                 st.session_state.logs.insert(0, {
                     "ts": data["ts"],
-                    "msg": f"[觸發] {ticker} #{alert_id} ${data['price']:.2f} — {'Telegram ✓' if ok else 'Telegram 失敗 ✗'}",
-                    "type": "trig",
+                    "msg": log_msg,
+                    "type": "trig" if ok else "err",
                 })
 
     st.session_state.logs = st.session_state.logs[:100]
@@ -439,8 +486,11 @@ with st.sidebar:
         if not tok or not cid:
             st.error("請先設定 Streamlit Secrets")
         else:
-            ok = send_telegram("✅ <b>股票警報系統</b>\n測試訊息發送成功！")
-            st.success("發送成功！") if ok else st.error("發送失敗，請檢查 Token/Chat ID")
+            ok, err = send_telegram("✅ <b>股票警報系統</b>\n測試訊息發送成功！")
+            if ok:
+                st.success("✓ 發送成功！")
+            else:
+                st.error(f"發送失敗：{err}")
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
@@ -705,7 +755,7 @@ with clr_col:
 if st.session_state.logs:
     rows = []
     for e in st.session_state.logs[:60]:
-        cls = "log-trig" if e["type"] == "trig" else ("log-warn" if e["type"] == "warn" else "log-info")
+        cls = "log-trig" if e["type"] in ("trig", "err") else ("log-warn" if e["type"] == "warn" else "log-info")
         rows.append(f'<div class="{cls}">[{e["ts"]}]&nbsp;&nbsp;{e["msg"]}</div>')
     st.markdown(f'<div class="log-panel">{"".join(rows)}</div>', unsafe_allow_html=True)
 else:
