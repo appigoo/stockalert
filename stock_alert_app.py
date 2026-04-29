@@ -4,7 +4,7 @@ import requests
 import time
 import json
 from datetime import datetime
-from streamlit_local_storage import LocalStorage
+from streamlit_js_eval import streamlit_js_eval
 
 # ─────────────────────────────────────────────
 #  PAGE CONFIG
@@ -197,25 +197,33 @@ div[data-testid="stCheckbox"] label {
 # ─────────────────────────────────────────────
 #  LOCAL STORAGE  (browser-side persistence)
 # ─────────────────────────────────────────────
-_ls = LocalStorage()
-
-# Keys we persist to localStorage
 PERSIST_KEYS = ["watchlist", "kline_period", "check_interval"]
 
 def save_to_storage():
-    """Write persisted keys to browser localStorage."""
+    """Write persisted keys to browser localStorage via JS."""
     payload = {k: st.session_state[k] for k in PERSIST_KEYS if k in st.session_state}
-    _ls.setItem("stock_alert_config", json.dumps(payload))
+    js_code = f"localStorage.setItem('stock_alert_config', JSON.stringify({json.dumps(payload)}));"
+    streamlit_js_eval(js_expressions=js_code, key=f"save_{int(time.time()*1000)}")
 
 def load_from_storage():
-    """Read persisted config from localStorage (runs once on first load)."""
-    raw = _ls.getItem("stock_alert_config")
+    """Read persisted config from localStorage via JS."""
+    raw = streamlit_js_eval(
+        js_expressions="localStorage.getItem('stock_alert_config')",
+        key="load_config",
+    )
     if not raw:
         return {}
     try:
         return json.loads(raw) if isinstance(raw, str) else raw
     except Exception:
         return {}
+
+def clear_storage():
+    """Delete persisted config from localStorage."""
+    streamlit_js_eval(
+        js_expressions="localStorage.removeItem('stock_alert_config');",
+        key=f"clear_{int(time.time()*1000)}",
+    )
 
 # ─────────────────────────────────────────────
 #  SESSION STATE
@@ -445,7 +453,7 @@ with st.sidebar:
         st.markdown('<span class="badge badge-wait">● 尚無記憶設定</span>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🗑 清除所有記憶"):
-        _ls.deleteItem("stock_alert_config")
+        clear_storage()
         st.session_state.watchlist      = []
         st.session_state.market_data    = {}
         st.session_state.last_triggered = {}
