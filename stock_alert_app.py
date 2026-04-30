@@ -383,23 +383,25 @@ def scrape_extended_price(ticker: str) -> dict:
 
     # ── Layer 1: yfinance fast_info (no external HTTP, uses internal session) ──
     try:
-        tk   = yf.Ticker(ticker)
-        fi   = tk.fast_info          # lightweight quote object
-        reg  = _safe_float(getattr(fi, "last_price",            None))
-        pre  = _safe_float(getattr(fi, "pre_market_price",      None))
-        post = _safe_float(getattr(fi, "post_market_price",     None))
+        tk  = yf.Ticker(ticker)
+        fi  = tk.fast_info
+        # previous_close is the last official closing price — use as anchor
+        reg  = _safe_float(getattr(fi, "previous_close",   None)) or                _safe_float(getattr(fi, "last_price",        None))
+        pre  = _safe_float(getattr(fi, "pre_market_price",  None))
+        post = _safe_float(getattr(fi, "post_market_price", None))
         if reg and reg > 0:
             result["regular_price"] = reg
-            # validate pre/post within ±30% of regular
             if pre  and (reg * 0.70 <= pre  <= reg * 1.30):
                 result["pre_price"]  = pre
             if post and (reg * 0.70 <= post <= reg * 1.30):
                 result["post_price"] = post
+            # Only return here if we have a genuine extended-hours price.
+            # If pre/post are None, fall through to Layer 2 for a fresher quote.
             result["price"]  = (result["pre_price"] or
                                 result["post_price"] or
                                 result["regular_price"])
             result["source"] = "yfinance fast_info"
-            if result["price"]:
+            if result["pre_price"] or result["post_price"]:
                 return result
     except Exception as e:
         result["error"] = f"fast_info: {str(e)[:60]}"
