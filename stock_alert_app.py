@@ -360,14 +360,14 @@ _SCRAPER_HEADERS = {
 @st.cache_data(ttl=30)
 def scrape_extended_price(ticker: str) -> dict:
     """
-    Fetch extended-hours price via Yahoo Finance JSON API (primary)
-    with HTML fallback. Returns dict:
-      price          — best available price (pre > post > regular)
-      regular_price  — last official close
-      pre_price      — pre-market price
-      post_price     — post/after-hours price
-      source         — which endpoint succeeded
-      error          — error message if all sources failed
+    Get extended-hours price using a 4-layer strategy:
+
+    Layer 1 — yfinance fast_info   : uses pre-authenticated session, works on Streamlit Cloud
+    Layer 2 — yfinance prepost=True: pull the last 1-day bar with prepost flag
+    Layer 3 — Yahoo JSON API       : query1/query2 (may be blocked on Streamlit Cloud)
+    Layer 4 — Yahoo HTML fallback  : parse fin-streamer tags with strict field + range checks
+
+    Returns dict: price, regular_price, pre_price, post_price, source, error
     """
     result = {
         "price": None, "regular_price": None,
@@ -381,71 +381,83 @@ def scrape_extended_price(ticker: str) -> dict:
         except (TypeError, ValueError):
             return None
 
-    # ── Primary: Yahoo Finance v8 JSON API ──────────────────────────────────
+    # ── Layer 1: yfinance fast_info (no external HTTP, uses internal session) ──
+    try:
+        tk   = yf.Ticker(ticker)
+        fi   = tk.fast_info          # lightweight quote object
+        reg  = _safe_float(getattr(fi, "last_price",            None))
+        pre  = _safe_float(getattr(fi, "pre_market_price",      None))
+        post = _safe_float(getattr(fi, "post_market_price",     None))
+        if reg and reg > 0:
+            result["regular_price"] = reg
+            # validate pre/post within ±30% of regular
+            if pre  and (reg * 0.70 <= pre  <= reg * 1.30):
+                result["pre_price"]  = pre
+            if post and (reg * 0.70 <= post <= reg * 1.30):
+                result["post_price"] = post
+            result["price"]  = (result["pre_price"] or
+                                result["post_price"] or
+                                result["regular_price"])
+            result["source"] = "yfinance fast_info"
+            if result["price"]:
+                return result
+    except Exception as e:
+        result["error"] = f"fast_info: {str(e)[:60]}"
+
+    # ── Layer 2: yfinance history prepost=True (1d, 1m bars) ─────────────────
+    try:
+        hist = yf.Ticker(ticker).history(period="1d", interval="1m", prepost=True)
+        if hist is not None and not hist.empty:
+            reg_hist = yf.Ticker(ticker).history(period="1d", interval="1m", prepost=False)
+            reg_close = float(reg_hist["Close"].iloc[-1]) if (reg_hist is not None and not reg_hist.empty) else None
+            live = float(hist["Close"].iloc[-1])
+            result["regular_price"] = reg_close or live
+            result["price"]  = live
+            result["source"] = "yfinance history prepost=True"
+            # label as pre/post based on session
+            sess_now = get_trading_session()
+            if sess_now["session"] == "PRE":
+                result["pre_price"]  = live
+            elif sess_now["session"] in ("POST", "NIGHT"):
+                result["post_price"] = live
+            return result
+    except Exception as e:
+        result["error"] = (result["error"] or "") + f" | prepost: {str(e)[:60]}"
+
+    # ── Layer 3: Yahoo Finance JSON API ──────────────────────────────────────
     for host in ("query1", "query2"):
         try:
             url  = f"https://{host}.finance.yahoo.com/v8/finance/quote?symbols={ticker}"
-            resp = requests.get(url, headers=_SCRAPER_HEADERS, timeout=15)
+            resp = requests.get(url, headers=_SCRAPER_HEADERS, timeout=10)
             if resp.status_code != 200:
                 continue
             ql = resp.json().get("quoteResponse", {}).get("result", [])
             if not ql:
                 continue
-            q = ql[0]
-            result["regular_price"] = _safe_float(q.get("regularMarketPrice"))
-            result["pre_price"]     = _safe_float(q.get("preMarketPrice"))
-            result["post_price"]    = _safe_float(q.get("postMarketPrice"))
-            result["source"]        = f"{host}.finance.yahoo.com (JSON API)"
-
-            # Sanity-check each price against regularMarketPrice:
-            # pre/post price should be within ±30% of regular close
-            reg = result["regular_price"]
-            if reg:
-                for key in ("pre_price", "post_price"):
-                    v = result[key]
-                    if v is not None and not (reg * 0.70 <= v <= reg * 1.30):
-                        result[key] = None   # discard implausible value
-
-            result["price"] = (result["pre_price"] or
-                               result["post_price"] or
-                               result["regular_price"])
-            if result["price"]:
-                return result
-        except Exception as e:
-            result["error"] = str(e)[:80]
-            continue
-
-    # ── Fallback: Yahoo Finance v7 quote summary ─────────────────────────────
-    try:
-        url  = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={ticker}"
-        resp = requests.get(url, headers=_SCRAPER_HEADERS, timeout=15)
-        if resp.status_code == 200:
-            ql = resp.json().get("quoteResponse", {}).get("result", [])
-            if ql:
-                q = ql[0]
-                result["regular_price"] = _safe_float(q.get("regularMarketPrice"))
-                result["pre_price"]     = _safe_float(q.get("preMarketPrice"))
-                result["post_price"]    = _safe_float(q.get("postMarketPrice"))
-                result["source"]        = "query1.finance.yahoo.com (v7 API)"
-                reg = result["regular_price"]
-                if reg:
-                    for key in ("pre_price", "post_price"):
-                        v = result[key]
-                        if v is not None and not (reg * 0.70 <= v <= reg * 1.30):
-                            result[key] = None
-                result["price"] = (result["pre_price"] or
-                                   result["post_price"] or
-                                   result["regular_price"])
+            q   = ql[0]
+            reg = _safe_float(q.get("regularMarketPrice"))
+            pre = _safe_float(q.get("preMarketPrice"))
+            pst = _safe_float(q.get("postMarketPrice"))
+            if reg and reg > 0:
+                result["regular_price"] = reg
+                if pre and (reg * 0.70 <= pre <= reg * 1.30):
+                    result["pre_price"]  = pre
+                if pst and (reg * 0.70 <= pst <= reg * 1.30):
+                    result["post_price"] = pst
+                result["price"]  = (result["pre_price"] or
+                                    result["post_price"] or
+                                    result["regular_price"])
+                result["source"] = f"{host}.finance.yahoo.com (JSON API)"
                 if result["price"]:
                     return result
-    except Exception as e:
-        result["error"] = (result["error"] or "") + f" | v7: {str(e)[:60]}"
+        except Exception as e:
+            result["error"] = (result["error"] or "") + f" | {host}: {str(e)[:50]}"
 
-    # ── Last resort: HTML page — only trust explicit field-named tags ────────
+    # ── Layer 4: HTML fallback — strict field-name + cross-validation ─────────
     for url in [f"https://finance.yahoo.com/quote/{ticker}/",
                 f"https://uk.finance.yahoo.com/quote/{ticker}/"]:
         try:
-            resp = requests.get(url, headers=_SCRAPER_HEADERS, timeout=15)
+            resp = requests.get(url, headers=_SCRAPER_HEADERS, timeout=10)
             if resp.status_code != 200:
                 continue
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -453,22 +465,19 @@ def scrape_extended_price(ticker: str) -> dict:
             found = {}
             for tag in soup.find_all("fin-streamer", attrs={"data-field": True}):
                 field = tag.get("data-field", "")
-                if field not in PRICE_FIELDS:
+                if field not in PRICE_FIELDS or field in found:
                     continue
                 raw = tag.get("data-value") or tag.get_text(strip=True)
                 try:
                     val = float(str(raw).replace(",", ""))
                 except (ValueError, TypeError):
                     continue
-                if field not in found:
-                    found[field] = val
-
-            # Cross-validate: if we have regularMarketPrice, use it as anchor
+                found[field] = val
             reg = found.get("regularMarketPrice")
             if reg and 0.5 <= reg <= 9_999:
                 result["regular_price"] = reg
-                for field, key in [("preMarketPrice","pre_price"),
-                                    ("postMarketPrice","post_price")]:
+                for field, key in [("preMarketPrice", "pre_price"),
+                                    ("postMarketPrice", "post_price")]:
                     v = found.get(field)
                     if v and (reg * 0.70 <= v <= reg * 1.30):
                         result[key] = v
@@ -479,9 +488,7 @@ def scrape_extended_price(ticker: str) -> dict:
                 if result["price"]:
                     return result
         except Exception as e:
-            result["error"] = (result["error"] or "") + f" | HTML {str(e)[:50]}"
-
-    return result
+            result["error"] = (result["error"] or "") + f" | HTML: {str(e)[:50]}"
 
     return result
 
