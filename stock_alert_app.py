@@ -3,7 +3,8 @@ import yfinance as yf
 import requests
 import time
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from bs4 import BeautifulSoup
 
 # ─────────────────────────────────────────────
 #  PAGE CONFIG
@@ -304,27 +305,165 @@ CHECK_INTERVAL_OPTIONS = {
 KLINE_OPTIONS = ["1m", "5m", "15m", "30m", "1h", "1d"]
 
 # ─────────────────────────────────────────────
+#  TRADING SESSION DETECTOR
+# ─────────────────────────────────────────────
+def _is_dst_us(dt_utc: datetime) -> bool:
+    year = dt_utc.year
+    mar = datetime(year, 3, 8, 7, 0, tzinfo=timezone.utc)
+    mar += timedelta(days=(6 - mar.weekday()) % 7)
+    nov = datetime(year, 11, 1, 6, 0, tzinfo=timezone.utc)
+    nov += timedelta(days=(6 - nov.weekday()) % 7)
+    return mar <= dt_utc < nov
+
+def get_et_time() -> datetime:
+    now_utc = datetime.now(timezone.utc)
+    offset  = timedelta(hours=-4) if _is_dst_us(now_utc) else timedelta(hours=-5)
+    return now_utc.astimezone(timezone(offset))
+
+def get_trading_session() -> dict:
+    """Returns session info: session name, label, colour, use_scraper flag."""
+    et  = get_et_time()
+    dow = et.weekday()          # 0=Mon … 6=Sun
+    hm  = et.hour + et.minute / 60.0
+    dst    = _is_dst_us(datetime.now(timezone.utc))
+    tz_str = "EDT" if dst else "EST"
+
+    if dow == 5 or (dow == 6 and hm < 20.0):
+        return dict(session="CLOSED",  label="休市（週末）",          color="#9a9487",
+                    use_scraper=False, et=et, tz=tz_str)
+    if 4.0 <= hm < 9.5:
+        return dict(session="PRE",     label="盤前 Pre-Market",       color="#7c5cbf",
+                    use_scraper=True,  et=et, tz=tz_str)
+    if 9.5 <= hm < 16.0:
+        return dict(session="REGULAR", label="正式交易 Regular",       color="#3a7d5e",
+                    use_scraper=False, et=et, tz=tz_str)
+    if 16.0 <= hm < 20.0:
+        return dict(session="POST",    label="盤後 After-Hours",       color="#c9821a",
+                    use_scraper=True,  et=et, tz=tz_str)
+    # hm >= 20 or hm < 4  (weekday or Sun night)
+    return dict(session="NIGHT",   label="夜盤 Night Session",     color="#1a6fa8",
+                use_scraper=True,  et=et, tz=tz_str)
+
+# ─────────────────────────────────────────────
+#  YAHOO FINANCE EXTENDED-HOURS SCRAPER
+# ─────────────────────────────────────────────
+_SCRAPER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-GB,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+@st.cache_data(ttl=30)
+def scrape_extended_price(ticker: str) -> dict:
+    """
+    Fetch extended-hours price via Yahoo Finance JSON API.
+    Falls back to HTML scraping if API fails.
+    Returns dict with keys: price, regular_price, pre_price, post_price, source, error.
+    """
+    result = {
+        "price": None, "regular_price": None,
+        "pre_price": None, "post_price": None,
+        "source": None, "error": None,
+    }
+
+    # Primary: Yahoo Finance v8 JSON API (query1 then query2)
+    for host in ("query1", "query2"):
+        api_url = f"https://{host}.finance.yahoo.com/v8/finance/quote?symbols={ticker}"
+        try:
+            resp = requests.get(api_url, headers=_SCRAPER_HEADERS, timeout=15)
+            if resp.status_code != 200:
+                continue
+            ql = resp.json().get("quoteResponse", {}).get("result", [])
+            if not ql:
+                continue
+            q = ql[0]
+            def _f(k):
+                v = q.get(k)
+                try: return float(v) if v is not None else None
+                except: return None
+            result.update({
+                "regular_price": _f("regularMarketPrice"),
+                "pre_price":     _f("preMarketPrice"),
+                "post_price":    _f("postMarketPrice"),
+                "source":        f"{host}.finance.yahoo.com (API)",
+            })
+            result["price"] = (result["pre_price"] or
+                               result["post_price"] or
+                               result["regular_price"])
+            if result["price"]:
+                return result
+        except Exception as e:
+            result["error"] = str(e)[:80]
+            continue
+
+    # Fallback: HTML scrape
+    html_urls = [
+        f"https://finance.yahoo.com/quote/{ticker}/",
+        f"https://uk.finance.yahoo.com/quote/{ticker}/",
+    ]
+    for url in html_urls:
+        try:
+            resp = requests.get(url, headers=_SCRAPER_HEADERS, timeout=15)
+            if resp.status_code != 200:
+                continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for tag in soup.find_all("fin-streamer"):
+                field = tag.get("data-field", "")
+                raw   = tag.get("data-value") or tag.get_text(strip=True)
+                try:
+                    val = float(str(raw).replace(",", ""))
+                except (ValueError, TypeError):
+                    continue
+                if not (0.5 <= val <= 99_999.0):
+                    continue
+                if field == "regularMarketPrice" and result["regular_price"] is None:
+                    result["regular_price"] = val
+                elif field == "preMarketPrice" and result["pre_price"] is None:
+                    result["pre_price"] = val
+                elif field == "postMarketPrice" and result["post_price"] is None:
+                    result["post_price"] = val
+            result["price"] = (result["pre_price"] or
+                               result["post_price"] or
+                               result["regular_price"])
+            result["source"] = f"HTML: {url}"
+            if result["price"]:
+                return result
+        except Exception as e:
+            result["error"] = (result["error"] or "") + f" | {str(e)[:60]}"
+    return result
+
+# ─────────────────────────────────────────────
 #  HELPERS
 # ─────────────────────────────────────────────
-def fetch_stock_data(ticker: str, kline: str, vol_days: int = 20):
+def fetch_stock_data(ticker: str, kline: str, vol_days: int = 20,
+                     live_price: float = None, price_source: str = "yfinance"):
+    """
+    Fetch OHLCV from yfinance.
+    If live_price is provided (from extended-hours scraper), it overrides the
+    last Close so that price conditions are evaluated against the real-time price.
+    """
     period = KLINE_PERIOD_MAP.get(kline, "5d")
     try:
         hist = yf.Ticker(ticker).history(period=period, interval=kline)
         if hist.empty or len(hist) < 2:
             return None
-        price   = float(hist["Close"].iloc[-1])
+        price   = live_price if live_price else float(hist["Close"].iloc[-1])
         volume  = float(hist["Volume"].iloc[-1])
-        # Use last N bars (excluding current) for average; cap at available bars
         n       = min(vol_days, len(hist) - 1)
         avg_vol = float(hist["Volume"].iloc[-1 - n : -1].mean()) if n > 0 else 0
         vol_ratio = volume / avg_vol if avg_vol > 0 else 0
         return {
-            "price":     price,
-            "volume":    volume,
-            "avg_vol":   avg_vol,
-            "vol_ratio": vol_ratio,
-            "vol_days":  n,           # actual bars used (may be less than requested)
-            "ts":        datetime.now().strftime("%H:%M:%S"),
+            "price":        price,
+            "volume":       volume,
+            "avg_vol":      avg_vol,
+            "vol_ratio":    vol_ratio,
+            "vol_days":     n,
+            "price_source": price_source,
+            "ts":           datetime.now().strftime("%H:%M:%S"),
         }
     except Exception:
         return None
@@ -401,16 +540,33 @@ def run_poll_cycle():
 
     kline = st.session_state.kline_period
 
-    # Batch fetch: one yfinance call per unique ticker (shared across alerts)
+    # Detect trading session for scraper decision
+    sess = get_trading_session()
+
+    # Batch fetch: one call per unique ticker
     unique_tickers = list({item["ticker"] for item in st.session_state.watchlist if item.get("enabled", True)})
     for ticker in unique_tickers:
-        # Use the largest vol_days among all alerts for this ticker so all alerts have enough data
         days_needed = max(
             (item.get("vol_days", 20) for item in st.session_state.watchlist
              if item["ticker"] == ticker and item.get("enabled", True)),
             default=20,
         )
-        data = fetch_stock_data(ticker, kline, days_needed)
+
+        # Extended-hours: try scraper first for live price
+        live_price   = None
+        price_source = "yfinance"
+        if sess["use_scraper"]:
+            scraped = scrape_extended_price(ticker)
+            if scraped.get("price"):
+                live_price   = scraped["price"]
+                price_source = f"延伸時段爬取 ({scraped.get('source','yahoo')})"
+                st.session_state.logs.insert(0, {
+                    "ts":  datetime.now().strftime("%H:%M:%S"),
+                    "msg": f"[爬取] {ticker} 延伸時段價格 ${live_price:.2f} ({sess['label']})",
+                    "type": "info",
+                })
+
+        data = fetch_stock_data(ticker, kline, days_needed, live_price, price_source)
         if data is None:
             st.session_state.logs.insert(0, {
                 "ts": datetime.now().strftime("%H:%M:%S"),
@@ -446,14 +602,18 @@ def run_poll_cycle():
                 n_actual = data.get("vol_days", vol_days)
                 safe_desc   = html.escape(desc)
                 safe_ticker = html.escape(ticker)
+                psrc        = html.escape(data.get("price_source", "yfinance"))
+                sess_now    = get_trading_session()
+                safe_sess   = html.escape(sess_now["label"])
                 msg = (
                     f"🔔 <b>股票警報！</b>\n"
                     f"📌 股票：<b>{safe_ticker}</b>\n"
-                    f"💰 價格：${data['price']:.2f}\n"
+                    f"🕐 時段：{safe_sess}\n"
+                    f"💰 價格：${data['price']:.2f}  ({psrc})\n"
                     f"📊 成交量：{data['volume']:,.0f}  (均量 {data['avg_vol']:,.0f}，{n_actual} 根)\n"
                     f"📈 量比：{data['vol_ratio']:.2f}x\n"
                     f"✅ 條件：{safe_desc}\n"
-                    f"🕐 時間：{data['ts']}"
+                    f"⏱ 時間：{data['ts']}"
                 )
                 ok, err = send_telegram(msg)
                 log_msg = (
@@ -610,6 +770,28 @@ with col_status:
     else:
         st.markdown('<span class="badge badge-off">● 已停止</span>', unsafe_allow_html=True)
 
+# ── Trading session banner ──
+_sess = get_trading_session()
+_et_str = _sess["et"].strftime("%H:%M")
+_sess_bg = {
+    "PRE":     "#f0eafa", "REGULAR": "#eaf5f0",
+    "POST":    "#fdf3e3", "NIGHT":   "#e8f4fd", "CLOSED":  "#f5f3ee",
+}.get(_sess["session"], "#f5f3ee")
+_sess_border = {
+    "PRE":     "#b39ddb", "REGULAR": "#81c784",
+    "POST":    "#ffb74d", "NIGHT":   "#4fc3f7", "CLOSED":  "#ddd9cf",
+}.get(_sess["session"], "#ddd9cf")
+_scraper_note = " ｜ 🕷 延伸時段爬取啟用" if _sess["use_scraper"] else ""
+st.markdown(
+    f'<div style="font-family:var(--mono);font-size:0.78rem;'
+    f'background:{_sess_bg};border:1px solid {_sess_border};'
+    f'border-radius:8px;padding:7px 14px;margin-bottom:10px;'
+    f'color:{_sess["color"]};">'
+    f'● {_sess["label"]} &nbsp;｜&nbsp; ET {_et_str} {_sess["tz"]}'
+    f'{_scraper_note}</div>',
+    unsafe_allow_html=True,
+)
+
 # ── Config summary bar ──
 kline_lbl   = st.session_state.kline_period
 check_lbl   = [k for k, v in CHECK_INTERVAL_OPTIONS.items() if v == st.session_state.check_interval][0]
@@ -697,10 +879,12 @@ else:
             dot_cls    = "dot-trig"   if triggered else "dot-ok"
             price_str  = f"${data['price']:,.2f}"
             n_actual   = data.get("vol_days", item.get("vol_days", 20))
+            psrc       = data.get("price_source", "yfinance")
+            src_tag    = f" ｜ 🕷 {psrc}" if "爬取" in psrc else ""
             vol_str    = (
                 f"量比 {data['vol_ratio']:.2f}×  ｜  "
                 f"均量（{n_actual}根）{data['avg_vol']:,.0f}  ｜  "
-                f"更新 {data['ts']}"
+                f"更新 {data['ts']}{src_tag}"
             )
         else:
             badge_cls  = "badge-wait"
@@ -757,7 +941,12 @@ with clr_col:
 if st.session_state.logs:
     rows = []
     for e in st.session_state.logs[:60]:
-        cls = "log-trig" if e["type"] in ("trig", "err") else ("log-warn" if e["type"] == "warn" else "log-info")
+        cls = (
+            "log-trig"  if e["type"] in ("trig", "err") else
+            "log-warn"  if e["type"] == "warn" else
+            "log-scrape" if e["type"] == "info" else
+            "log-info"
+        )
         rows.append(f'<div class="{cls}">[{e["ts"]}]&nbsp;&nbsp;{e["msg"]}</div>')
     st.markdown(f'<div class="log-panel">{"".join(rows)}</div>', unsafe_allow_html=True)
 else:
